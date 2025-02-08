@@ -3,8 +3,10 @@
 
 #include <vector>
 #include <numeric>
+#include <cmath>
 #include "Eigen/Eigen"
 #include "sensor_msgs/msg/laser_scan.hpp"
+#include <nanoflann.hpp>
 
 using namespace std;
 using namespace Eigen;
@@ -25,7 +27,6 @@ namespace scan_matching
     tuple<Eigen::MatrixXd, Eigen::MatrixXd> rangeToPCL(const vector<float>& source, const vector<float>& destination, double min_angle, double max_angle);
     Eigen::Matrix4d best_fit_transform(const Eigen::MatrixXd &A, const Eigen::MatrixXd &B);
     ICP_OUT icp(const sensor_msgs::msg::LaserScan &prev_scan, const sensor_msgs::msg::LaserScan &scan, int max_iterations=20, double tolerance=0.0001);
-    NEIGHBOR nearest_neighbot(const Eigen::MatrixXd &src, const Eigen::MatrixXd &dst);
-    float dist(const Eigen::Vector3d &pta, const Eigen::Vector3d &ptb);
+    NEIGHBOR nearest_neighbor(const Eigen::MatrixXd &src, const Eigen::MatrixXd &dst);
 }
 #endif

@@ -101,7 +101,7 @@ namespace scan_matching
         double prev_error = 0;
         double mean_error = 0;
         for (int i=0; i<max_iterations; i++){
-            neighbor = nearest_neighbot(src3d.transpose(),B);
+            neighbor = nearest_neighbor(src3d.transpose(),B);
 
             for(int j=0; j<row; j++){
                 dst_chorder.block<3,1>(0,j) = dst.block<3,1>(0,neighbor.indices[j]);
@@ -130,37 +130,22 @@ namespace scan_matching
         return result;
     }
 
-    NEIGHBOR nearest_neighbot(const Eigen::MatrixXd &src, const Eigen::MatrixXd &dst){
-        int row_src = src.rows();
-        int row_dst = dst.rows();
-        Eigen::Vector3d vec_src;
-        Eigen::Vector3d vec_dst;
+    NEIGHBOR nearest_neighbor(const Eigen::MatrixXd &src, const Eigen::MatrixXd &dst){
+        using KDTree = nanoflann::KDTreeEigenMatrixAdaptor<Eigen::MatrixXd>;
+        KDTree index(src.cols(), std::cref(src), 25);
+        index.index->buildIndex();
         NEIGHBOR neigh;
-        float min = 100;
-        int index = 0;
-        float dist_temp = 0;
 
-        for(int ii=0; ii < row_src; ii++){
-            vec_src = src.block<1,3>(ii,0).transpose();
-            min = 100;
-            index = 0;
-            dist_temp = 0;
-            for(int jj=0; jj < row_dst; jj++){
-                vec_dst = dst.block<1,3>(jj,0).transpose();
-                dist_temp = dist(vec_src,vec_dst);
-                if (dist_temp < min){
-                    min = dist_temp;
-                    index = jj;
-                }
-            }
-            neigh.distances.push_back(min);
-            neigh.indices.push_back(index);
+        size_t nearestIndex;
+        double outDistSqr;
+        nanoflann::KNNResultSet<double> resultSet(1);
+
+        for (int i = 0; i < dst.rows(); ++i)
+        {
+            resultSet.init(&nearestIndex, &outDistSqr);
+            index.index->findNeighbors(resultSet, dst.row(i).data(), nanoflann::SearchParams());
+            neigh.distances.push_back(sqrt(outDistSqr));
+            neigh.indices.push_back(nearestIndex);
         }
-
         return neigh;
     }
-
-    float dist(const Eigen::Vector3d &pta, const Eigen::Vector3d &ptb){
-        return sqrt((pta[0]-ptb[0])*(pta[0]-ptb[0]) + (pta[1]-ptb[1])*(pta[1]-ptb[1]) + (pta[2]-ptb[2])*(pta[2]-ptb[2]));
-    }
-}

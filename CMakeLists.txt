@@ -10,6 +10,7 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(Eigen3 REQUIRED)
+find_package(nanoflann)
 # uncomment the following section in order to fill in
 # further dependencies manually.
 # find_package(<dependency> REQUIRED)
@@ -39,6 +40,7 @@ target_link_libraries(${library_name} PUBLIC
 )
 target_link_libraries(icp PUBLIC
   Eigen3::Eigen
+  nanoflann::nanoflann
   ${sensor_msgs_TARGETS}
 )
 add_executable(${executable_name}
