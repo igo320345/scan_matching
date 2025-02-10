@@ -1,5 +1,5 @@
 #include "scan_matching/icp.hpp"
-
+#include <iostream>
 namespace scan_matching
 {
     tuple<Eigen::MatrixXd, Eigen::MatrixXd> rangeToPCL(const vector<float>& source, const vector<float>& destination, double min_angle, double max_angle) {
@@ -28,7 +28,7 @@ namespace scan_matching
             pclDestination.row(i) = pointsDestination[i];
         }
         
-        return make_tuple(pclSource, pclDestination);
+        return make_tuple(pclSource.eval(), pclDestination.eval());
     }
 
     Eigen::Matrix4d best_fit_transform(const Eigen::MatrixXd &A, const Eigen::MatrixXd &B){
@@ -76,44 +76,48 @@ namespace scan_matching
         T.block<3,3>(0,0) = R;
         T.block<3,1>(0,3) = t;
         return T;
-
     }
 
     ICP_OUT icp(const sensor_msgs::msg::LaserScan &prev_scan, const sensor_msgs::msg::LaserScan &scan, int max_iterations, double tolerance){
         auto [A, B] = rangeToPCL(prev_scan.ranges, scan.ranges, scan.angle_min, scan.angle_max);
+        
         int row = A.rows();
-        Eigen::MatrixXd src = Eigen::MatrixXd::Ones(3+1,row);
-        Eigen::MatrixXd src3d = Eigen::MatrixXd::Ones(3,row);
-        Eigen::MatrixXd dst = Eigen::MatrixXd::Ones(3+1,row);
-        NEIGHBOR neighbor;
+        Eigen::MatrixXd src = Eigen::MatrixXd::Ones(4, row);
+        Eigen::MatrixXd dst = Eigen::MatrixXd::Ones(4, row);
+        Eigen::MatrixXd dst_chorder = Eigen::MatrixXd::Ones(4, row);
         Eigen::Matrix4d T;
-        Eigen::MatrixXd dst_chorder = Eigen::MatrixXd::Ones(3,row);
+        NEIGHBOR neighbor;
         ICP_OUT result;
         int iter = 0;
 
-        for (int i = 0; i<row; i++){
-            src.block<3,1>(0,i) = A.block<1,3>(i,0).transpose();
-            src3d.block<3,1>(0,i) = A.block<1,3>(i,0).transpose();
-            dst.block<3,1>(0,i) = B.block<1,3>(i,0).transpose();
-
-        }
+        src.topRows(3) = A.transpose();
+        dst.topRows(3) = B.transpose();
 
         double prev_error = 0;
         double mean_error = 0;
-        for (int i=0; i<max_iterations; i++){
-            neighbor = nearest_neighbor(src3d.transpose(),B);
 
-            for(int j=0; j<row; j++){
-                dst_chorder.block<3,1>(0,j) = dst.block<3,1>(0,neighbor.indices[j]);
+        for (int i = 0; i < max_iterations; i++){
+            neighbor = nearest_neighbor(src.topRows(3).transpose(), dst.topRows(3).transpose());
+            NEIGHBOR neighbor_bf = brute_force_nearest_neighbor(src.topRows(3).transpose(), dst.topRows(3).transpose());
+
+            // DEBUG 
+            // std::cout << "Source point" << std::endl;
+            // for (int i = 0; i < 4; i++) std::cout << src(i, 0) << " ";
+            // std::cout << std::endl;
+            // std::cout << "nanoflann dst point" << std::endl;
+            // for (int i = 0; i < 4; i++) std::cout << dst(i, neighbor.indices[0])<< " ";
+            // std::cout << std::endl;
+            // std::cout << "brute force dst point" << std::endl;
+            // for (int i = 0; i < 4; i++) std::cout << dst(i, neighbor_bf.indices[0])<< " ";
+            // std::cout << std::endl;
+            // std::cout << "----" << std::endl;
+            // DEBUG
+
+            for(int j=0; j<row; j++){ 
+                dst_chorder.block<4,1>(0,j) = dst.block<4, 1>(0, neighbor.indices[j]);
             }
-
-            T = best_fit_transform(src3d.transpose(),dst_chorder.transpose());
-
+            T = best_fit_transform(src.topRows(3).transpose(),dst_chorder.topRows(3).transpose());
             src = T*src;
-            for(int j=0; j<row; j++){
-                src3d.block<3,1>(0,j) = src.block<3,1>(0,j);
-            }
-
             mean_error = std::accumulate(neighbor.distances.begin(),neighbor.distances.end(),0.0)/neighbor.distances.size();
             if (abs(prev_error - mean_error) < tolerance){
                 break;
@@ -122,7 +126,7 @@ namespace scan_matching
             iter = i+2;
         }
 
-        T = best_fit_transform(A,src3d.transpose());
+        T = best_fit_transform(A, src.topRows(3).transpose());
         result.trans = T;
         result.distances = neighbor.distances;
         result.iter = iter;
@@ -132,20 +136,56 @@ namespace scan_matching
 
     NEIGHBOR nearest_neighbor(const Eigen::MatrixXd &src, const Eigen::MatrixXd &dst){
         using KDTree = nanoflann::KDTreeEigenMatrixAdaptor<Eigen::MatrixXd>;
-        KDTree index(src.cols(), std::cref(src), 25);
-        index.index->buildIndex();
+        int row_src = src.rows();
         NEIGHBOR neigh;
-
-        size_t nearestIndex;
-        double outDistSqr;
-        nanoflann::KNNResultSet<double> resultSet(1);
-
-        for (int i = 0; i < dst.rows(); ++i)
-        {
+        neigh.indices.resize(row_src);
+        neigh.distances.resize(row_src);
+        KDTree index(dst.cols(), std::cref(dst), 5);
+        index.index->buildIndex();
+        
+        for (int i = 0; i < row_src; i++) {
+            size_t nearestIndex;
+            double outDistSqr;
+            nanoflann::KNNResultSet<double> resultSet(1);
+            auto vec_src = src.block<1,3>(i,0).transpose();
             resultSet.init(&nearestIndex, &outDistSqr);
-            index.index->findNeighbors(resultSet, dst.row(i).data(), nanoflann::SearchParams());
-            neigh.distances.push_back(sqrt(outDistSqr));
-            neigh.indices.push_back(nearestIndex);
+            index.index->findNeighbors(resultSet, vec_src.data(), nanoflann::SearchParams());
+            neigh.indices[i] = nearestIndex;
+            neigh.distances[i] = sqrt(outDistSqr);
         }
         return neigh;
     }
+
+    NEIGHBOR brute_force_nearest_neighbor(const Eigen::MatrixXd &src, const Eigen::MatrixXd &dst){
+        int row_src = src.rows();
+        int row_dst = dst.rows();
+        Eigen::Vector3d vec_src;
+        Eigen::Vector3d vec_dst;
+        NEIGHBOR neigh;
+        float min = 100;
+        int index = 0;
+        float dist_temp = 0;
+
+        for(int ii=0; ii < row_src; ii++){
+            vec_src = src.block<1,3>(ii,0).transpose();
+            min = 100;
+            index = 0;
+            dist_temp = 0;
+            for(int jj=0; jj < row_dst; jj++){
+                vec_dst = dst.block<1,3>(jj,0).transpose();
+                dist_temp = dist(vec_src,vec_dst);
+                if (dist_temp < min){
+                    min = dist_temp;
+                    index = jj;
+                }
+            }
+            neigh.distances.push_back(min);
+            neigh.indices.push_back(index);
+        }
+        return neigh;
+    }
+
+    float dist(const Eigen::Vector3d &pta, const Eigen::Vector3d &ptb){
+        return sqrt((pta[0]-ptb[0])*(pta[0]-ptb[0]) + (pta[1]-ptb[1])*(pta[1]-ptb[1]) + (pta[2]-ptb[2])*(pta[2]-ptb[2]));
+    }
+}
