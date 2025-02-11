@@ -2,16 +2,17 @@
 #include <iostream>
 namespace scan_matching
 {
+    // TODO: laser_beams_num
     std::tuple<matrix_t, matrix_t> rangeToPCL(const std::vector<float>& source, const std::vector<float>& destination, double min_angle, double max_angle) {
         float beamAngleIncrement = (max_angle - min_angle) / 360;
         float beamAngle = min_angle;
         
-        matrix_t pclSource(source.size(), 3);
-        matrix_t pclDestination(destination.size(), 3);
+        matrix_t pclSource((int) source.size() / 10, 3); // hardcode
+        matrix_t pclDestination((int) destination.size() / 10, 3);
         
-        for (size_t i = 0; i < source.size(); ++i) {
-            float lengthSource = source[i];
-            float lengthDestination = destination[i];
+        for (size_t i = 0; i < source.size() / 10; i++) { // hardcode
+            float lengthSource = source[i * 10];
+            float lengthDestination = destination[i * 10]; // hardcode
             
             if (lengthSource > 0 && lengthSource < INFINITY && lengthDestination > 0 && lengthDestination < INFINITY) {
                 pclSource(i, 0) = lengthSource * cos(beamAngle);
@@ -22,7 +23,7 @@ namespace scan_matching
                 pclDestination(i, 1) = lengthDestination * sin(beamAngle);
                 pclDestination(i, 2) = 0;
             }        
-            beamAngle += beamAngleIncrement;
+            beamAngle += beamAngleIncrement * 10; // hardcode
         }
         
         return std::make_tuple(pclSource, pclDestination);
@@ -140,5 +141,35 @@ namespace scan_matching
             neigh.distances[i] = sqrt(outDistSqr);
         }
         return neigh;
+    }
+    pcl::PointCloud<pcl::PointXYZ>::Ptr eigenToPCL(const matrix_t &eigen_matrix) {
+        pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>);
+
+        for (int i = 0; i < eigen_matrix.rows(); ++i) {
+            pcl::PointXYZ point;
+            point.x = eigen_matrix(i, 0);
+            point.y = eigen_matrix(i, 1);
+            point.z = eigen_matrix(i, 2);
+            cloud->push_back(point);
+        }
+        return cloud;
+    }
+    matrix_t icp_pcl(const pcl::PointCloud<pcl::PointXYZ>::Ptr &source,
+                    const pcl::PointCloud<pcl::PointXYZ>::Ptr &target,
+                    int max_iterations, double tolerance) {
+        pcl::IterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> icp;
+        icp.setInputSource(source);
+        icp.setInputTarget(target);
+        icp.setMaximumIterations(max_iterations);
+        icp.setTransformationEpsilon(tolerance);
+
+        pcl::PointCloud<pcl::PointXYZ> Final;
+        icp.align(Final);
+
+        if (icp.hasConverged()) {
+            return icp.getFinalTransformation();
+        } else {
+            return matrix_t::Identity(4, 4);
+        }
     }
 }

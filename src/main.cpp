@@ -5,7 +5,7 @@ int main(int argc, char const *argv[])
 {
     rclcpp::init(argc, argv);
     auto node = std::make_shared<scan_matching::ScanMatching>();
-    node->spin();
+    rclcpp::spin(node);
     rclcpp::shutdown();
     return 0;
 }
