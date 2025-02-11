@@ -2,41 +2,38 @@
 #include <iostream>
 namespace scan_matching
 {
-    tuple<Eigen::MatrixXd, Eigen::MatrixXd> rangeToPCL(const vector<float>& source, const vector<float>& destination, double min_angle, double max_angle) {
-        double beamAngleIncrement = (max_angle - min_angle) / 360;
-        double beamAngle = min_angle;
+    std::tuple<matrix_t, matrix_t> rangeToPCL(const std::vector<float>& source, const std::vector<float>& destination, double min_angle, double max_angle) {
+        float beamAngleIncrement = (max_angle - min_angle) / 360;
+        float beamAngle = min_angle;
         
-        vector<Vector3d> pointsSource, pointsDestination;
+        matrix_t pclSource(source.size(), 3);
+        matrix_t pclDestination(destination.size(), 3);
         
         for (size_t i = 0; i < source.size(); ++i) {
-            double lengthSource = source[i];
-            double lengthDestination = destination[i];
+            float lengthSource = source[i];
+            float lengthDestination = destination[i];
             
             if (lengthSource > 0 && lengthSource < INFINITY && lengthDestination > 0 && lengthDestination < INFINITY) {
-                pointsSource.emplace_back(lengthSource * cos(beamAngle), lengthSource * sin(beamAngle), 0);
-                pointsDestination.emplace_back(lengthDestination * cos(beamAngle), lengthDestination * sin(beamAngle), 0);
-            }
-            
+                pclSource(i, 0) = lengthSource * cos(beamAngle);
+                pclSource(i, 1) = lengthSource * sin(beamAngle);
+                pclSource(i, 2) = 0;
+
+                pclDestination(i, 0) = lengthDestination * cos(beamAngle);
+                pclDestination(i, 1) = lengthDestination * sin(beamAngle);
+                pclDestination(i, 2) = 0;
+            }        
             beamAngle += beamAngleIncrement;
         }
         
-        Eigen::MatrixXd pclSource(pointsSource.size(), 3);
-        Eigen::MatrixXd pclDestination(pointsDestination.size(), 3);
-        
-        for (size_t i = 0; i < pointsSource.size(); ++i) {
-            pclSource.row(i) = pointsSource[i];
-            pclDestination.row(i) = pointsDestination[i];
-        }
-        
-        return make_tuple(pclSource.eval(), pclDestination.eval());
+        return std::make_tuple(pclSource, pclDestination);
     }
 
-    Eigen::Matrix4d best_fit_transform(const Eigen::MatrixXd &A, const Eigen::MatrixXd &B){
-        Eigen::Matrix4d T = Eigen::MatrixXd::Identity(4,4);
-        Eigen::Vector3d centroid_A(0,0,0);
-        Eigen::Vector3d centroid_B(0,0,0);
-        Eigen::MatrixXd AA = A;
-        Eigen::MatrixXd BB = B;
+    matrix_t best_fit_transform(const matrix_t &A, const matrix_t &B){
+        matrix_t T = matrix_t::Identity(4,4);
+        Eigen::Vector3f centroid_A(0,0,0);
+        Eigen::Vector3f centroid_B(0,0,0);
+        matrix_t AA = A;
+        matrix_t BB = B;
         int row = A.rows();
 
         for(int i=0; i<row; i++){
@@ -50,15 +47,15 @@ namespace scan_matching
             BB.block<1,3>(i,0) = B.block<1,3>(i,0) - centroid_B.transpose();
         }
 
-        Eigen::MatrixXd H = AA.transpose()*BB;
-        Eigen::MatrixXd U;
-        Eigen::VectorXd S;
-        Eigen::MatrixXd V;
-        Eigen::MatrixXd Vt;
-        Eigen::Matrix3d R;
-        Eigen::Vector3d t;
+        matrix_t H = AA.transpose()*BB;
+        matrix_t U;
+        matrix_t S;
+        matrix_t V;
+        matrix_t Vt;
+        matrix_t R;
+        matrix_t t;
 
-        JacobiSVD<Eigen::MatrixXd> svd(H, ComputeFullU | ComputeFullV);
+        Eigen::JacobiSVD<matrix_t> svd(H, Eigen::ComputeFullU | Eigen::ComputeFullV);
         U = svd.matrixU();
         S = svd.singularValues();
         V = svd.matrixV();
@@ -82,10 +79,10 @@ namespace scan_matching
         auto [A, B] = rangeToPCL(prev_scan.ranges, scan.ranges, scan.angle_min, scan.angle_max);
         
         int row = A.rows();
-        Eigen::MatrixXd src = Eigen::MatrixXd::Ones(4, row);
-        Eigen::MatrixXd dst = Eigen::MatrixXd::Ones(4, row);
-        Eigen::MatrixXd dst_chorder = Eigen::MatrixXd::Ones(4, row);
-        Eigen::Matrix4d T;
+        matrix_t src = matrix_t::Ones(4, row);
+        matrix_t dst = matrix_t::Ones(4, row);
+        matrix_t dst_chorder = matrix_t::Ones(4, row);
+        matrix_t T;
         NEIGHBOR neighbor;
         ICP_OUT result;
         int iter = 0;
@@ -98,20 +95,6 @@ namespace scan_matching
 
         for (int i = 0; i < max_iterations; i++){
             neighbor = nearest_neighbor(src.topRows(3).transpose(), dst.topRows(3).transpose());
-            NEIGHBOR neighbor_bf = brute_force_nearest_neighbor(src.topRows(3).transpose(), dst.topRows(3).transpose());
-
-            // DEBUG 
-            // std::cout << "Source point" << std::endl;
-            // for (int i = 0; i < 4; i++) std::cout << src(i, 0) << " ";
-            // std::cout << std::endl;
-            // std::cout << "nanoflann dst point" << std::endl;
-            // for (int i = 0; i < 4; i++) std::cout << dst(i, neighbor.indices[0])<< " ";
-            // std::cout << std::endl;
-            // std::cout << "brute force dst point" << std::endl;
-            // for (int i = 0; i < 4; i++) std::cout << dst(i, neighbor_bf.indices[0])<< " ";
-            // std::cout << std::endl;
-            // std::cout << "----" << std::endl;
-            // DEBUG
 
             for(int j=0; j<row; j++){ 
                 dst_chorder.block<4,1>(0,j) = dst.block<4, 1>(0, neighbor.indices[j]);
@@ -134,58 +117,28 @@ namespace scan_matching
         return result;
     }
 
-    NEIGHBOR nearest_neighbor(const Eigen::MatrixXd &src, const Eigen::MatrixXd &dst){
-        using KDTree = nanoflann::KDTreeEigenMatrixAdaptor<Eigen::MatrixXd>;
+    NEIGHBOR nearest_neighbor(const matrix_t &src, const matrix_t &dst){
+        using KDTree = nanoflann::KDTreeEigenMatrixAdaptor<matrix_t>;
+        
         int row_src = src.rows();
         NEIGHBOR neigh;
         neigh.indices.resize(row_src);
         neigh.distances.resize(row_src);
-        KDTree index(dst.cols(), std::cref(dst), 5);
+        KDTree index(3, std::cref(dst), 10);
         index.index->buildIndex();
-        
+
+        size_t nearestIndex;
+        float outDistSqr;
+        nanoflann::KNNResultSet<float> resultSet(1);
+        std::vector<float> vec_src(3);
+
         for (int i = 0; i < row_src; i++) {
-            size_t nearestIndex;
-            double outDistSqr;
-            nanoflann::KNNResultSet<double> resultSet(1);
-            auto vec_src = src.block<1,3>(i,0).transpose();
+            for (int j = 0; j < 3; j++) vec_src[j] = src(i, j);
             resultSet.init(&nearestIndex, &outDistSqr);
-            index.index->findNeighbors(resultSet, vec_src.data(), nanoflann::SearchParams());
+            index.index->findNeighbors(resultSet, &vec_src[0], nanoflann::SearchParams());
             neigh.indices[i] = nearestIndex;
             neigh.distances[i] = sqrt(outDistSqr);
         }
         return neigh;
-    }
-
-    NEIGHBOR brute_force_nearest_neighbor(const Eigen::MatrixXd &src, const Eigen::MatrixXd &dst){
-        int row_src = src.rows();
-        int row_dst = dst.rows();
-        Eigen::Vector3d vec_src;
-        Eigen::Vector3d vec_dst;
-        NEIGHBOR neigh;
-        float min = 100;
-        int index = 0;
-        float dist_temp = 0;
-
-        for(int ii=0; ii < row_src; ii++){
-            vec_src = src.block<1,3>(ii,0).transpose();
-            min = 100;
-            index = 0;
-            dist_temp = 0;
-            for(int jj=0; jj < row_dst; jj++){
-                vec_dst = dst.block<1,3>(jj,0).transpose();
-                dist_temp = dist(vec_src,vec_dst);
-                if (dist_temp < min){
-                    min = dist_temp;
-                    index = jj;
-                }
-            }
-            neigh.distances.push_back(min);
-            neigh.indices.push_back(index);
-        }
-        return neigh;
-    }
-
-    float dist(const Eigen::Vector3d &pta, const Eigen::Vector3d &ptb){
-        return sqrt((pta[0]-ptb[0])*(pta[0]-ptb[0]) + (pta[1]-ptb[1])*(pta[1]-ptb[1]) + (pta[2]-ptb[2])*(pta[2]-ptb[2]));
     }
 }

@@ -13,8 +13,10 @@ using namespace Eigen;
 
 namespace scan_matching
 {
+    using matrix_t = Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic>;
+
     typedef struct{
-        Eigen::Matrix4d trans;
+        matrix_t trans;
         std::vector<float> distances;
         int iter;
     }  ICP_OUT;
@@ -24,11 +26,9 @@ namespace scan_matching
         std::vector<int> indices;
     } NEIGHBOR;
 
-    tuple<Eigen::MatrixXd, Eigen::MatrixXd> rangeToPCL(const vector<float>& source, const vector<float>& destination, double min_angle, double max_angle);
-    Eigen::Matrix4d best_fit_transform(const Eigen::MatrixXd &A, const Eigen::MatrixXd &B);
+    tuple<matrix_t, matrix_t> rangeToPCL(const vector<float>& source, const vector<float>& destination, double min_angle, double max_angle);
+    matrix_t best_fit_transform(const matrix_t &A, const matrix_t &B);
     ICP_OUT icp(const sensor_msgs::msg::LaserScan &prev_scan, const sensor_msgs::msg::LaserScan &scan, int max_iterations=20, double tolerance=0.0001);
-    NEIGHBOR nearest_neighbor(const Eigen::MatrixXd &src, const Eigen::MatrixXd &dst);
-    NEIGHBOR brute_force_nearest_neighbor(const Eigen::MatrixXd &src, const Eigen::MatrixXd &dst);
-    float dist(const Eigen::Vector3d &pta, const Eigen::Vector3d &ptb);
+    NEIGHBOR nearest_neighbor(const matrix_t &src, const matrix_t &dst);
 }
 #endif
