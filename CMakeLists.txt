@@ -16,11 +16,10 @@ find_package(nav_msgs)
 find_package(geometry_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
-find_package(PCL REQUIRED)
+find_package(pcl_conversions REQUIRED)
+find_package(pcl_ros REQUIRED)
+find_package(PCL REQUIRED COMPONENTS common io registration filters)
 
-# uncomment the following section in order to fill in
-# further dependencies manually.
-# find_package(<dependency> REQUIRED)
 set(executable_name scan_matching)
 set(library_name ${executable_name}_core)
 
@@ -30,10 +29,13 @@ add_library(${library_name} SHARED
 add_library(icp SHARED
 src/icp.cpp
 )
-add_library(utils SHARED
-src/utils.cpp
+ament_target_dependencies(icp
+    sensor_msgs 
+    nav_msgs 
+    tf2_ros 
+    pcl_conversions 
+    pcl_ros
 )
-
 target_include_directories(${library_name}
   PUBLIC
   "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
@@ -42,32 +44,15 @@ target_include_directories(icp
   PUBLIC
   "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
   "$<INSTALL_INTERFACE:include/${PROJECT_NAME}>")
-target_include_directories(utils
-PUBLIC
-"$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
-"$<INSTALL_INTERFACE:include/${PROJECT_NAME}>")
 
 target_link_libraries(${library_name} PUBLIC
   rclcpp::rclcpp
   ${sensor_msgs_TARGETS}
   ${nav_msgs_TARGETS}
+  ${PCL_LIBRARIES}
   icp
   tf2_ros::tf2_ros
-  utils
 )
-target_link_libraries(icp PUBLIC
-  Eigen3::Eigen
-  nanoflann::nanoflann
-  ${sensor_msgs_TARGETS}
-  ${PCL_LIBRARIES}
-)
-
-target_link_libraries(utils PUBLIC
-  Eigen3::Eigen
-  ${geometry_msgs_TARGETS}
-  tf2::tf2
-)
-
 add_executable(${executable_name}
   src/main.cpp
 )
@@ -92,12 +77,6 @@ install(TARGETS icp
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
 )
-install(TARGETS utils
-  EXPORT utils
-  ARCHIVE DESTINATION lib
-  LIBRARY DESTINATION lib
-  RUNTIME DESTINATION bin
-)
 install(TARGETS ${executable_name}
   RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
@@ -108,11 +87,9 @@ install(DIRECTORY include/
 ament_export_include_directories(include/${PROJECT_NAME})
 ament_export_libraries(${library_name})
 ament_export_libraries(icp)
-ament_export_libraries(utils)
 ament_export_dependencies(rclcpp sensor_msgs)
 ament_export_targets(${library_name})
 ament_export_targets(icp)
-ament_export_targets(utils)
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   # the following line skips the linter which checks for copyrights

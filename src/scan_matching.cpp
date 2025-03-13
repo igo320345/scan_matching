@@ -1,65 +1,66 @@
 #include "scan_matching/scan_matching.hpp"
 
-namespace scan_matching
-{
-    ScanMatching::ScanMatching()
-    : Node("scan_matching_node"), rate_hz_(30)
-    {
-        laser_subscription_ = this->create_subscription<sensor_msgs::msg::LaserScan>(
-        "diff_drive/scan", 10, std::bind(&ScanMatching::laserCallback, this, _1));
-        odom_publisher_ = this->create_publisher<nav_msgs::msg::Odometry>("lidar_odom", 10);
+namespace scan_matching {
+    ScanMatching::ScanMatching() : Node("scan_matching_node") {
+        scan_sub_ = this->create_subscription<sensor_msgs::msg::LaserScan>(
+            "diff_drive/scan", 10, std::bind(&ScanMatching::scan_callback, this, _1));
+
+        odom_pub_ = this->create_publisher<nav_msgs::msg::Odometry>("lidar_odom", 10);
         tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
-        tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
-        tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 
-        string frame_id = "diff_drive/odom";
-        string child_frame_id = "diff_drive/base_link";
-        odom_ = std::make_shared<nav_msgs::msg::Odometry>();
-        odom_->header.frame_id = frame_id;
-        odom_->child_frame_id = child_frame_id;
+        RCLCPP_INFO(this->get_logger(), "Scan Matching Node Started");
     }
-    ScanMatching::~ScanMatching()
-    {
+
+    ScanMatching::~ScanMatching() {
 
     }
-    void ScanMatching::laserCallback(const sensor_msgs::msg::LaserScan::SharedPtr msg)
-    {
-        prev_scan_ = scan_;
-        scan_ = msg;
+    void ScanMatching::scan_callback(const sensor_msgs::msg::LaserScan::SharedPtr scan) {
+        pcl::PointCloud<pcl::PointXYZ>::Ptr curr_cloud(new pcl::PointCloud<pcl::PointXYZ>);
+        laserScanToPointCloud(scan, curr_cloud);
 
-        if (scan_ && prev_scan_) {
-            // scan_matching::ICP_OUT icp_out = scan_matching::icp(*prev_scan_, *scan_);
-            // TODO: replace with my icp implementation
-            auto [A, B] = rangeToPCL(prev_scan_->ranges, scan_->ranges, scan_->angle_min, scan_->angle_max);
-            auto source = eigenToPCL(A);
-            auto destination = eigenToPCL(B);
-            auto icp_trans = icp_pcl(source, destination);
-            
-            geometry_msgs::msg::TransformStamped transform;
-            try {
-            transform = tf_buffer_->lookupTransform("diff_drive", "diff_drive/lidar_link", tf2::TimePointZero);
-            } catch (tf2::TransformException &ex) {
-                RCLCPP_WARN(this->get_logger(), "Could not transform base_link to lidar_link: %s", ex.what());
-            }
-            matrix_t S = transformToMatrix(transform);
-            matrix_t P = poseToMatrix(odom_->pose.pose);
-            
-            P = (P * S) * icp_trans.inverse() * S.inverse();
-            odom_->pose.pose = matrixToPose(P);
-            odom_->header.stamp = this->get_clock()->now();
-
-            odom_publisher_->publish(*odom_);
-
-            geometry_msgs::msg::TransformStamped odom_tf;
-            odom_tf.header.stamp = this->get_clock()->now();
-            odom_tf.header.frame_id = "diff_drive/odom";
-            odom_tf.child_frame_id = "diff_drive";
-            odom_tf.transform.translation.x = odom_->pose.pose.position.x;
-            odom_tf.transform.translation.y = odom_->pose.pose.position.y;
-            odom_tf.transform.translation.z = odom_->pose.pose.position.z;
-            odom_tf.transform.rotation = odom_->pose.pose.orientation;
-
-            tf_broadcaster_->sendTransform(odom_tf);
+        if (prev_cloud_->empty()) {
+            *prev_cloud_ = *curr_cloud;
+            return;
         }
+
+        Eigen::Matrix4f transform = performICP(prev_cloud_, curr_cloud);
+
+        updateOdometry(transform);
+
+        *prev_cloud_ = *curr_cloud;
+    }
+
+    void ScanMatching::updateOdometry(const Eigen::Matrix4f &T) {
+        static Eigen::Matrix4f P = Eigen::Matrix4f::Identity();
+
+        P = P * T.inverse();
+
+        double x = P(0, 3);
+        double y = P(1, 3);
+
+        double theta = std::atan2(P(1, 0), P(0, 0));
+
+        nav_msgs::msg::Odometry odom_msg;
+        odom_msg.header.stamp = this->now();
+        odom_msg.header.frame_id = "diff_drive/odom";
+        odom_msg.child_frame_id = "diff_drive";
+
+        odom_msg.pose.pose.position.x = x;
+        odom_msg.pose.pose.position.y = y;
+        odom_msg.pose.pose.orientation.z = std::sin(theta / 2);
+        odom_msg.pose.pose.orientation.w = std::cos(theta / 2);
+
+        odom_pub_->publish(odom_msg);
+
+        geometry_msgs::msg::TransformStamped tf_msg;
+        tf_msg.header.stamp = this->now();
+        tf_msg.header.frame_id = "diff_drive/odom";
+        tf_msg.child_frame_id = "diff_drive";
+        tf_msg.transform.translation.x = x;
+        tf_msg.transform.translation.y = y;
+        tf_msg.transform.rotation.z = std::sin(theta / 2);
+        tf_msg.transform.rotation.w = std::cos(theta / 2);
+
+        tf_broadcaster_->sendTransform(tf_msg);
     }
 }
